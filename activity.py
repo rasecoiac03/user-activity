@@ -16,14 +16,17 @@ if not args.user:
 
 
 API_BASE_URL = 'https://api.github.com'
-DEFAULT_HEADERS = {
-    'Authorization': 'token {}'.format(os.environ['GH_TOKEN'])
-}
+DEFAULT_HEADERS = {}
+
+GH_TOKEN = os.environ['GH_TOKEN']
+if GH_TOKEN:
+    DEFAULT_HEADERS['Authorization'] = 'token {}'.format(GH_TOKEN)
+
 ALLOWED_EVENTS = [
-    # 'IssueCommentEvent',
-    # 'IssuesEvent',
-    # 'PullRequestEvent',
-    # 'PullRequestReviewCommentEvent',
+    'IssueCommentEvent',
+    'IssuesEvent',
+    'PullRequestEvent',
+    'PullRequestReviewCommentEvent',
     'GollumEvent',  # Triggered when a Wiki page is created or updated.
 ]
 
@@ -44,8 +47,7 @@ def _increase(d, key):
 
 def _issue_comment(event):
     payload = event.get('payload', {})
-    return '[{}] (issue: {}) "{}"'.format(
-        event.get('repo', {}).get('name'),
+    return '(issue: {}) "{}"'.format(
         payload.get('issue', {}).get('number'),
         payload.get('comment', {}).get('body')
     )
@@ -53,9 +55,8 @@ def _issue_comment(event):
 
 def _issue(event):
     payload = event.get('payload', {})
-    return '[{}] [action:{}] ({}) {}'.format(
-        event.get('repo', {}).get('name'),
-        payload.get('action'),
+    return '[action:{}] ({}) {}'.format(
+        payload.get('action', '').upper(),
         payload.get('issue', {}).get('number'),
         payload.get('issue', {}).get('title'),
     )
@@ -66,9 +67,8 @@ def _pull_request(event):
     # if payload.get('action') != 'opened':
     #     return None
 
-    return '[{}] [action:{}] {}({})'.format(
-        event.get('repo', {}).get('name'),
-        payload.get('action'),
+    return '[action:{}] {}({})'.format(
+        payload.get('action', '').upper(),
         payload.get('pull_request', {}).get('title'),
         payload.get('pull_request', {}).get('number'),
     )
@@ -76,8 +76,7 @@ def _pull_request(event):
 
 def _pull_request_review_comment(event):
     payload = event.get('payload', {})
-    return '[{}] [pr: {}({})] "{}"'.format(
-        event.get('repo', {}).get('name'),
+    return '[pr: {}({})] "{}"'.format(
         payload.get('pull_request', {}).get('title'),
         payload.get('pull_request', {}).get('number'),
         payload.get('comment', {}).get('body'),
@@ -85,12 +84,10 @@ def _pull_request_review_comment(event):
 
 
 def _wiki_event(event):
-    import pprint;pprint.pprint(event)
     pages = event.get('payload', {}).get('pages', [])
     first_page = pages[0] if len(pages) > 0 else None # FIXME get all pages
 
-    return '[{}] [action:{}] {}'.format(
-        event.get('repo', {}).get('name'),
+    return '[action:{}] {}'.format(
         first_page.get('action', {}),
         first_page.get('title', {}),
     )
@@ -105,13 +102,14 @@ EVENT_READ = {
 }
 
 
-def _read_event(activity, event_type, event):
+def _read_event(activity, event_repo, event_type, event):
     event_result = EVENT_READ[event_type](event)
     if event_result:
-        event_list = activity.get(event_type, [])
+        event_activity = activity.get(event_type, {})
+        event_list = event_activity.get(event_repo, [])
         event_list.append(event_result)
-        activity[event_type] = event_list
-
+        event_activity[event_repo] = event_list
+        activity[event_type] = event_activity
     return activity
 
 
@@ -121,11 +119,12 @@ def _read(result, response):
                         .format(response.status_code, response.content))
     for event in response.json():
         event_type = event.get('type')
+        event_repo = event.get('repo', {}).get('name')
         if event_type in ALLOWED_EVENTS:
             result['summary'] = _increase(
                 result.get('summary', {}), event_type)
             result['activity'] = _read_event(
-                result.get('activity', {}), event_type, event)
+                result.get('activity', {}), event_repo, event_type, event)
     return result
 
 
